@@ -195,11 +195,25 @@
       opt.textContent = p;
       railPrefSelect.appendChild(opt);
     });
+
+    document.getElementById('gist-token-input').value = localStorage.getItem(GIST_TOKEN_STORAGE_KEY) || '';
+    updateSyncStatus();
   }
 
   function toggleMapSettings() {
     const el = document.getElementById('map-settings-panel');
     el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
+
+  function toggleSyncPanel() {
+    const el = document.getElementById('sync-panel');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
+
+  // スマホ表示時：全画面地図の上に記録パネルを重ねる／閉じる
+  function toggleMobilePanel() {
+    const isOpen = document.body.classList.toggle('mobile-panel-open');
+    document.getElementById('mobile-view-toggle').textContent = isOpen ? '🗺️ 地図に戻る' : '📋 記録パネル';
   }
 
   // =========================================================
@@ -398,7 +412,9 @@
       "国土地理院 淡色地図（見やすい背景）": gsiPale,
       "シンプル白地図（文字なし）": cartoLight
     };
-    L.control.layers(baseMaps, null, { collapsed: false, position: 'topright' }).addTo(map);
+    // スマホ幅（style.css の @media と同じ 768px）では背景地図の切替を折りたたむ
+    const isMobileLayout = window.matchMedia('(max-width: 768px)').matches;
+    L.control.layers(baseMaps, null, { collapsed: isMobileLayout, position: 'topright' }).addTo(map);
   }
 
   // =========================================================
@@ -1396,6 +1412,26 @@
     if (selectedRailLineName && railLineMap.has(selectedRailLineName)) renderRailDetail(selectedRailLineName);
   }
 
+  // rail_master_n05.json の中身に都道府県を付与し、キャッシュ保存して描画する（手動読込・自動取得で共通）
+  async function applyN05MasterData(parsed) {
+    parsed.lines.forEach(line => {
+      const prefs = new Set();
+      (line.stations || []).forEach(st => {
+        const code = findMunicipalityCodeByLatLng(st.lat, st.lng);
+        const muni = code ? muniLookup.get(code) : null;
+        if (muni?.pref) prefs.add(muni.pref);
+      });
+      line.prefs = Array.from(prefs);
+    });
+    await saveCachedDataByKey('n05_master_v1', parsed.lines);
+    baseRawRailLines = parsed.lines;
+    isCurrentN05Mode = true;
+    const patched = applyRecentAbolishedPatches(baseRawRailLines);
+    buildRailwayLayers(patched, true);
+    updateRailStats();
+    renderRailLineList();
+  }
+
   function importN05MasterFile(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -1404,23 +1440,7 @@
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        const parsed = JSON.parse(e.target.result);
-        parsed.lines.forEach(line => {
-          const prefs = new Set();
-          (line.stations || []).forEach(st => {
-            const code = findMunicipalityCodeByLatLng(st.lat, st.lng);
-            const muni = code ? muniLookup.get(code) : null;
-            if (muni?.pref) prefs.add(muni.pref);
-          });
-          line.prefs = Array.from(prefs);
-        });
-        await saveCachedDataByKey('n05_master_v1', parsed.lines);
-        baseRawRailLines = parsed.lines;
-        isCurrentN05Mode = true;
-        const patched = applyRecentAbolishedPatches(baseRawRailLines);
-        buildRailwayLayers(patched, true);
-        updateRailStats();
-        renderRailLineList();
+        await applyN05MasterData(JSON.parse(e.target.result));
         overlay.style.display = 'none';
         alert('N05高精細データの読み込みが完了しました！');
       } catch (err) {
@@ -1453,6 +1473,18 @@
         buildRailwayLayers(applyRecentAbolishedPatches(baseRawRailLines), false);
         updateRailStats();
         renderRailLineList();
+      } else if (location.protocol !== 'file:') {
+        // サーバー配信時：端末にキャッシュが無ければ同じサーバーの rail_master_n05.json を自動取得（初回のみ約10MB）
+        // ※N05は再配布不可のためGitHub Pagesには置かない。そこでは404になり、従来どおり手動読込に任せる
+        const sub = document.getElementById('loading-sub');
+        const prevSub = sub.textContent;
+        sub.textContent = '（初回のみ鉄道データ 約10MB をダウンロードしています）';
+        try {
+          const res = await fetch('rail_master_n05.json');
+          if (res.ok) await applyN05MasterData(await res.json());
+        } finally {
+          sub.textContent = prevSub;
+        }
       }
     } catch (err) {
       console.error(err);
@@ -2257,8 +2289,8 @@
   // =========================================================
   // 全5タブ統合 JSONバックアップ出力・読込
   // =========================================================
-  function exportData() {
-    const payload = {
+  function buildBackupPayload() {
+    return {
       version: 3,
       municipalities: userRecords,
       riddenSegments,
@@ -2267,7 +2299,34 @@
       seaUserRecords,
       busUserRecords
     };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  }
+
+  // バックアップJSONで全記録を上書きし、画面を再描画する（ファイル読込・クラウド取得で共通）
+  function applyBackupPayload(parsed) {
+    if (parsed.version >= 2 || parsed.municipalities) {
+      userRecords    = parsed.municipalities || {};
+      riddenSegments = parsed.riddenSegments || {};
+      stationRecords = parsed.stationRecords || {};
+      if (parsed.airUserRecords) airUserRecords = parsed.airUserRecords;
+      if (parsed.seaUserRecords) seaUserRecords = parsed.seaUserRecords;
+      if (parsed.busUserRecords) busUserRecords = parsed.busUserRecords;
+    } else {
+      userRecords = parsed;
+    }
+    saveStorage();
+    updateAllStyles();
+    updateAllRailStyles();
+    initAirSystem();
+    initSeaSystem();
+    initBusSystem();
+    updateStats();
+    updateRailStats();
+    renderList();
+    renderRailLineList();
+  }
+
+  function exportData() {
+    const blob = new Blob([JSON.stringify(buildBackupPayload(), null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -2282,27 +2341,7 @@
     const reader = new FileReader();
     reader.onload = e => {
       try {
-        const parsed = JSON.parse(e.target.result);
-        if (parsed.version >= 2 || parsed.municipalities) {
-          userRecords    = parsed.municipalities || {};
-          riddenSegments = parsed.riddenSegments || {};
-          stationRecords = parsed.stationRecords || {};
-          if (parsed.airUserRecords) airUserRecords = parsed.airUserRecords;
-          if (parsed.seaUserRecords) seaUserRecords = parsed.seaUserRecords;
-          if (parsed.busUserRecords) busUserRecords = parsed.busUserRecords;
-        } else {
-          userRecords = parsed;
-        }
-        saveStorage();
-        updateAllStyles();
-        updateAllRailStyles();
-        initAirSystem();
-        initSeaSystem();
-        initBusSystem();
-        updateStats();
-        updateRailStats();
-        renderList();
-        renderRailLineList();
+        applyBackupPayload(JSON.parse(e.target.result));
         alert('全データを読み込みました！');
       } catch {
         alert('JSONファイルの形式が正しくありません。');
@@ -2310,6 +2349,123 @@
       event.target.value = '';
     };
     reader.readAsText(file);
+  }
+
+  // =========================================================
+  // ☁ GitHub Gist 同期（非公開Gistに全データJSONを保存・取得）
+  // =========================================================
+  function saveGistToken() {
+    const token = document.getElementById('gist-token-input').value.trim();
+    if (token) localStorage.setItem(GIST_TOKEN_STORAGE_KEY, token);
+    else localStorage.removeItem(GIST_TOKEN_STORAGE_KEY);
+    updateSyncStatus();
+  }
+
+  function loadGistSyncState() {
+    try {
+      return JSON.parse(localStorage.getItem(GIST_SYNC_STORAGE_KEY)) || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveGistSyncState(gist) {
+    localStorage.setItem(GIST_SYNC_STORAGE_KEY, JSON.stringify({ gistId: gist.id, remoteUpdatedAt: gist.updated_at }));
+  }
+
+  function updateSyncStatus(message) {
+    const el = document.getElementById('sync-status');
+    if (message) {
+      el.textContent = message;
+      return;
+    }
+    const state = loadGistSyncState();
+    if (!localStorage.getItem(GIST_TOKEN_STORAGE_KEY)) el.textContent = 'トークン未設定';
+    else if (state.remoteUpdatedAt) el.textContent = `最終同期: ${new Date(state.remoteUpdatedAt).toLocaleString('ja-JP')}`;
+    else el.textContent = 'トークン設定済（この端末ではまだ同期していません）';
+  }
+
+  async function gistApi(path, options = {}) {
+    const token = localStorage.getItem(GIST_TOKEN_STORAGE_KEY);
+    if (!token) throw new Error('GitHubトークンが未設定です。');
+    const res = await fetch(`https://api.github.com${path}`, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        ...(options.body ? { 'Content-Type': 'application/json' } : {})
+      }
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      const err = new Error(`GitHub API ${res.status}: ${detail.message || res.statusText}`);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  }
+
+  // 同期先Gistを取得する。この端末に記録が無ければ、自分のGist一覧からファイル名で探す
+  async function findSyncGist() {
+    const state = loadGistSyncState();
+    if (state.gistId) {
+      try {
+        return await gistApi(`/gists/${state.gistId}`);
+      } catch (err) {
+        if (err.status !== 404) throw err; // Gistが削除済みなら一覧から探し直す
+      }
+    }
+    const list = await gistApi('/gists?per_page=100');
+    const hit = list.find(g => g.files && g.files[GIST_FILE_NAME]);
+    return hit ? gistApi(`/gists/${hit.id}`) : null;
+  }
+
+  async function pushToGist() {
+    try {
+      updateSyncStatus('☁ 保存中...');
+      const remote = await findSyncGist();
+      // 最後に保存した方が勝つため、この端末の最終同期より後に別端末で保存されていたら確認する
+      if (remote && remote.updated_at !== loadGistSyncState().remoteUpdatedAt &&
+          !confirm(`クラウドには、この端末が最後に同期した後の保存があります（${new Date(remote.updated_at).toLocaleString('ja-JP')}）。\nこの端末の記録で上書きしますか？`)) {
+        updateSyncStatus();
+        return;
+      }
+      const files = { [GIST_FILE_NAME]: { content: JSON.stringify(buildBackupPayload(), null, 2) } };
+      const saved = remote
+        ? await gistApi(`/gists/${remote.id}`, { method: 'PATCH', body: JSON.stringify({ files }) })
+        : await gistApi('/gists', { method: 'POST', body: JSON.stringify({ description: '旅の軌跡マップ 同期データ', public: false, files }) });
+      saveGistSyncState(saved);
+      updateSyncStatus();
+      alert('クラウド（非公開Gist）に保存しました！');
+    } catch (err) {
+      updateSyncStatus();
+      alert('クラウド保存エラー: ' + err.message);
+    }
+  }
+
+  async function pullFromGist() {
+    try {
+      updateSyncStatus('☁ 取得中...');
+      const remote = await findSyncGist();
+      if (!remote) {
+        updateSyncStatus();
+        alert('クラウドに同期データがまだありません。先にどこかの端末で「クラウドに保存」してください。');
+        return;
+      }
+      const file = remote.files[GIST_FILE_NAME];
+      const content = file.truncated ? await (await fetch(file.raw_url)).text() : file.content; // 1MB超は本文が省略される
+      if (!confirm(`クラウドの記録（${new Date(remote.updated_at).toLocaleString('ja-JP')} 保存）で、この端末の記録を上書きします。よろしいですか？`)) {
+        updateSyncStatus();
+        return;
+      }
+      applyBackupPayload(JSON.parse(content));
+      saveGistSyncState(remote);
+      updateSyncStatus();
+      alert('クラウドから全データを取得しました！');
+    } catch (err) {
+      updateSyncStatus();
+      alert('クラウド取得エラー: ' + err.message);
+    }
   }
 
   // =========================================================

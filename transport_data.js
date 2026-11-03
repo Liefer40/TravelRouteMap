@@ -8,6 +8,11 @@
   const SEA_STORAGE_KEY      = 'japan_sea_travel_log_v1';
   const BUS_STORAGE_KEY      = 'japan_bus_travel_log_v1';
 
+  // ☁ GitHub Gist 同期（トークンと同期状態は端末ごとに保存）
+  const GIST_TOKEN_STORAGE_KEY = 'japan_travel_gist_token_v1';
+  const GIST_SYNC_STORAGE_KEY  = 'japan_travel_gist_sync_v1'; // { gistId, remoteUpdatedAt }
+  const GIST_FILE_NAME         = 'japan_all_travel_log.json';
+
   const TOPOJSON_SOURCES = {
     s0010: [
       'https://cdn.jsdelivr.net/gh/smartnews-smri/japan-topography@main/data/municipality/topojson/s0010/N03-21_210101.json',

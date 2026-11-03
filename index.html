@@ -13,7 +13,10 @@
   <header>
     <div class="header-top">
       <h1>日本全国 陸・鉄・空・海・バス 旅の軌跡マップ</h1>
-      <button class="btn" style="flex:0; padding:3px 8px; font-size:10px; background:#334155; color:#fff;" onclick="toggleMapSettings()">⚙ 地図調整</button>
+      <div style="display:flex; gap:4px;">
+        <button class="btn" style="flex:0; padding:3px 8px; font-size:10px; background:#334155; color:#fff; white-space:nowrap;" onclick="toggleSyncPanel()">☁ 同期</button>
+        <button class="btn" style="flex:0; padding:3px 8px; font-size:10px; background:#334155; color:#fff; white-space:nowrap;" onclick="toggleMapSettings()">⚙ 地図調整</button>
+      </div>
     </div>
     <p>5タブ排他クリック連動（自治体 / 鉄道・廃線 / 空路 / 航路 / バス）</p>
   </header>
@@ -66,6 +69,17 @@
         <span>市区町村の境界線をくっきり表示</span>
       </label>
     </div>
+  </div>
+
+  <!-- 折りたたみ式：☁ GitHub Gist 同期パネル -->
+  <div class="section" id="sync-panel" style="background:#f0fdf4; display:none;">
+    <div class="section-title">☁ 記録のクラウド同期（非公開 GitHub Gist）</div>
+    <input type="password" id="gist-token-input" placeholder="GitHubトークン（classic・gist スコープのみ）" autocomplete="off" onchange="saveGistToken()">
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="pushToGist()">☁↑ クラウドに保存</button>
+      <button class="btn" onclick="pullFromGist()">☁↓ クラウドから取得</button>
+    </div>
+    <div id="sync-status" style="font-size:10px; color:#475569; margin-top:4px;">トークン未設定</div>
   </div>
 
   <!-- ==========================================
@@ -403,6 +417,9 @@
     <div class="legend-item"><span class="legend-line" style="background:#059669; height:3.5px;"></span>乗車済バス（緑破線＝未乗）</div>
   </div>
 </div>
+
+<!-- スマホ表示時のみ：地図 ⇔ 記録パネル切替 -->
+<button id="mobile-view-toggle" onclick="toggleMobilePanel()">📋 記録パネル</button>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/topojson-client@3"></script>

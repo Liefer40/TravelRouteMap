@@ -436,3 +436,40 @@
       transition: opacity 0.25s ease;
     }
     #zoom-hint.show { opacity: 1; }
+
+    /* スマホ用レイアウト：地図を全画面にし、記録パネルはボタンで重ねて表示（PC表示は変更なし） */
+    #mobile-view-toggle { display: none; }
+    @media (max-width: 768px) {
+      body { height: 100dvh; }
+      #sidebar {
+        display: none;
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        z-index: 1500;
+        overflow-y: auto;
+      }
+      #sidebar::after { content: ''; flex: none; height: 76px; } /* 切替ボタンで末尾が隠れないための余白 */
+      body.mobile-panel-open #sidebar { display: flex; }
+      .tab-pane { flex: none; overflow: visible; }
+      .scroll-list { flex: none; max-height: 45vh; }
+      select, input[type="text"], input[type="date"], input[type="password"], textarea { font-size: 16px; } /* iOSの入力時ズーム防止 */
+      #mobile-view-toggle {
+        display: block;
+        position: fixed;
+        left: 12px;
+        bottom: 24px;
+        z-index: 1600;
+        padding: 10px 16px;
+        border: none;
+        border-radius: 999px;
+        background: #0f172a;
+        color: #fff;
+        font-size: 14px;
+        font-weight: bold;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        cursor: pointer;
+      }
+      #mode-badge { left: 50px; right: 60px; font-size: 10px; padding: 4px 8px; }
+      .legend { font-size: 9px; max-width: 200px; padding: 5px 7px; bottom: 24px; right: 8px; }
+    }
