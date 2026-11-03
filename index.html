@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日本全国 陸・鉄・空・海・バス 旅の軌跡マップ</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="sidebar">
+  <header>
+    <div class="header-top">
+      <h1>日本全国 陸・鉄・空・海・バス 旅の軌跡マップ</h1>
+      <button class="btn" style="flex:0; padding:3px 8px; font-size:10px; background:#334155; color:#fff;" onclick="toggleMapSettings()">⚙ 地図調整</button>
+    </div>
+    <p>5タブ排他クリック連動（自治体 / 鉄道・廃線 / 空路 / 航路 / バス）</p>
+  </header>
+
+  <!-- 5タブ切り替えバー -->
+  <div class="main-tabs">
+    <button class="main-tab-btn active" id="tab-btn-muni" onclick="switchMainTab('muni')">🏙️ 市区町村</button>
+    <button class="main-tab-btn" id="tab-btn-rail" onclick="switchMainTab('rail')">🚃 鉄道</button>
+    <button class="main-tab-btn" id="tab-btn-air"  onclick="switchMainTab('air')">✈️ 空路</button>
+    <button class="main-tab-btn" id="tab-btn-sea"  onclick="switchMainTab('sea')">⛴️ 航路</button>
+    <button class="main-tab-btn" id="tab-btn-bus"  onclick="switchMainTab('bus')">🚌 バス</button>
+  </div>
+
+  <!-- レイヤー表示ON/OFFバー -->
+  <div class="layer-bar">
+    <label class="toggle-row"><input type="checkbox" id="show-muni-layer" checked onchange="toggleLayers()"><span>自治体</span></label>
+    <label class="toggle-row"><input type="checkbox" id="show-rail-layer" checked onchange="toggleLayers()"><span>現役鉄道</span></label>
+    <label class="toggle-row"><input type="checkbox" id="show-abandoned-layer" checked onchange="toggleLayers()"><span style="color:#92400e;">廃線</span></label>
+    <label class="toggle-row"><input type="checkbox" id="show-air-layer" checked onchange="toggleLayers()"><span style="color:#0284c7;">空路</span></label>
+    <label class="toggle-row"><input type="checkbox" id="show-sea-layer" checked onchange="toggleLayers()"><span style="color:#4f46e5;">航路</span></label>
+    <label class="toggle-row"><input type="checkbox" id="show-bus-layer" checked onchange="toggleLayers()"><span style="color:#059669;">バス</span></label>
+    <label class="toggle-row"><input type="checkbox" id="show-station-layer" checked onchange="toggleLayers()"><span>駅・港・空港点</span></label>
+  </div>
+
+  <!-- 折りたたみ式：地図・透過設定パネル -->
+  <div class="section" id="map-settings-panel" style="background:#f1f5f9; display:none;">
+    <div class="section-title">地図と境界線の表示設定</div>
+    <div class="control-row">
+      <span>境界線の精細度:</span>
+      <select id="resolution-select" style="width:190px; margin-bottom:0; padding:3px 6px; font-size:11px;">
+        <option value="s0010" selected>高精細（なめらか）</option>
+        <option value="s0001">軽量（高速表示）</option>
+      </select>
+    </div>
+    <div class="control-row">
+      <span>自治体塗りの濃さ: <strong id="fill-opacity-val">45%</strong></span>
+      <input type="range" id="fill-opacity-slider" class="slider-input" min="10" max="90" value="45">
+    </div>
+    <div class="control-row">
+      <span>背景地図の濃さ(透過): <strong id="map-opacity-val">75%</strong></span>
+      <input type="range" id="map-opacity-slider" class="slider-input" min="15" max="100" value="75">
+    </div>
+    <div class="control-row">
+      <span>背景地図の彩度(色味): <strong id="map-saturate-val">60%</strong></span>
+      <input type="range" id="map-saturate-slider" class="slider-input" min="0" max="100" value="60">
+    </div>
+    <div class="control-row">
+      <label class="toggle-row">
+        <input type="checkbox" id="strong-border-toggle" checked>
+        <span>市区町村の境界線をくっきり表示</span>
+      </label>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       タブ1：🏙️ 市区町村管理ペイン
+       ========================================== -->
+  <div class="tab-pane active" id="pane-muni">
+    <div class="section">
+      <div class="progress-wrap">
+        <div class="progress-label">
+          <span><strong>全国制覇率</strong>（通過以上）</span>
+          <span id="national-stats">0 / 0 (0.0%)</span>
+        </div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill" id="national-bar"></div></div>
+      </div>
+      <div class="progress-wrap" style="margin-bottom:4px;">
+        <div class="progress-label">
+          <span id="pref-progress-title"><strong>都道府県別制覇率</strong></span>
+          <span id="pref-stats">- / - (0.0%)</span>
+        </div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill" id="pref-bar"></div></div>
+      </div>
+      <div class="control-row">
+        <label class="toggle-row"><input type="checkbox" id="merge-designated-toggle"><span>政令指定都市を「市単位」で集計</span></label>
+      </div>
+      <div class="control-row">
+        <label class="toggle-row" style="color:#1d4ed8; font-weight:bold;">
+          <input type="checkbox" id="cycle-click-toggle" checked>
+          <span>地図クリックでステータス順送り (0→1→2→3→4→0)</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">地域・キーワード絞り込み</div>
+      <select id="pref-select"><option value="ALL">全国すべて表示</option></select>
+      <input type="text" id="search-input" placeholder="市区町村名で検索（例：札幌市中央区、那覇市）" style="margin-bottom:0;">
+    </div>
+
+    <div id="muni-list" class="scroll-list"></div>
+
+    <div class="editor-panel">
+      <div class="section-title">
+        <span id="selected-name">地図またはリストから自治体を選択</span>
+        <span id="selected-code" style="font-size:10px; color:#94a3b8;"></span>
+      </div>
+      <div class="status-btns">
+        <button class="status-btn" data-status="0" onclick="setStatus(0)">0:未踏</button>
+        <button class="status-btn" data-status="1" onclick="setStatus(1)">1:通過</button>
+        <button class="status-btn" data-status="2" onclick="setStatus(2)">2:立寄</button>
+        <button class="status-btn" data-status="3" onclick="setStatus(3)">3:宿泊</button>
+        <button class="status-btn" data-status="4" onclick="setStatus(4)">4:居住</button>
+      </div>
+      <input type="date" id="visit-date" onchange="saveCurrentDetails()" disabled>
+      <textarea id="visit-memo" rows="2" placeholder="旅の刻印（降りた駅や施設・居住時期メモ）" oninput="saveCurrentDetails()" disabled></textarea>
+
+      <div class="btn-row">
+        <button class="btn btn-gmap" id="open-gmap-btn" onclick="openInGoogleMaps()" disabled>Googleマップ</button>
+        <button class="btn" onclick="exportData()">全データ保存</button>
+        <button class="btn" onclick="document.getElementById('import-file').click()">全データ読込</button>
+        <button class="btn btn-danger" onclick="resetAllData()">全リセット</button>
+        <input type="file" id="import-file" style="display:none" accept=".json" onchange="importData(event)">
+      </div>
+
+      <div class="patch-box" style="background:#faf5ff; border-color:#e9d5ff; color:#581c87;">
+        <label class="toggle-row" style="margin-bottom:2px; font-size:10px;">
+          <input type="checkbox" id="timeline-visit-upgrade" checked>
+          <span><strong>visit（滞在・駐車）</strong>は「2:立ち寄り」、移動は「1:通過」</span>
+        </label>
+        <label class="toggle-row" style="margin-bottom:4px; font-size:10px;">
+          <input type="checkbox" id="timeline-allow-promote" checked>
+          <span>既に「1:通過」の自治体もvisitがあれば「2:立ち寄り」へ昇格</span>
+        </label>
+        <button class="btn btn-timeline" style="width:100%;" onclick="document.getElementById('timeline-file').click()">
+          📍 Googleタイムライン取込（※市区町村のみ反映）
+        </button>
+        <input type="file" id="timeline-file" style="display:none" accept=".json" onchange="importTimelineData(event)">
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       タブ2：🚃 鉄道路線管理ペイン
+       ========================================== -->
+  <div class="tab-pane" id="pane-rail">
+    <div class="section">
+      <div class="progress-wrap">
+        <div class="progress-label">
+          <span id="rail-stat-label-line"><strong>路線完乗数</strong></span>
+          <span id="rail-line-stats">0 / 0 路線 (一部: 0)</span>
+        </div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill rail-fill" id="rail-line-bar"></div></div>
+      </div>
+      <div class="progress-wrap" style="margin-bottom:3px;">
+        <div class="progress-label">
+          <span><strong>区間（駅間）乗車率</strong></span>
+          <span id="rail-seg-stats">0 / 0 区間 (0.0%)</span>
+        </div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill rail-fill" id="rail-seg-bar"></div></div>
+      </div>
+      <div class="control-row" style="font-size:11px; color:#475569;">
+        <span>🚉 駅記録: <strong id="rail-station-stats">乗降: 0 / 通過: 0 駅</strong></span>
+        <span id="rail-data-mode-badge" class="badge badge-0">標準データ</span>
+      </div>
+      <div class="patch-box">
+        <label class="toggle-row" style="font-weight:bold; color:#92400e;">
+          <input type="checkbox" id="patch-2024-2026-toggle" checked onchange="reapplyRailPatches()">
+          <span>🩹 2024〜2026年 最新廃線パッチ適用（留萌線・根室線[富良野〜新得]・スカイレール）</span>
+        </label>
+        <label class="toggle-row" style="margin-top:2px; color:#78350f;">
+          <input type="checkbox" id="patch-2027-scheduled-toggle" onchange="reapplyRailPatches()">
+          <span>2027春廃止届済区間（津軽線[蟹田〜三厩]・久留里線[久留里〜上総亀山]）も廃線化</span>
+        </label>
+      </div>
+      <div class="btn-row" style="margin-top:4px;">
+        <button class="btn btn-n05" onclick="document.getElementById('n05-file-input').click()">
+          📂 N05高精細曲線＆1950〜廃線データ(rail_master_n05.json)読込
+        </button>
+        <input type="file" id="n05-file-input" style="display:none" accept=".json" onchange="importN05MasterFile(event)">
+      </div>
+      <div class="control-row" style="margin-top:3px;">
+        <label class="toggle-row" style="color:#9f1239; font-weight:bold;">
+          <input type="checkbox" id="map-seg-direct-toggle" checked>
+          <span>地図上の線路クリックで路線絞り込みと同時に区間を乗車/未乗切替</span>
+        </label>
+      </div>
+      <div class="control-row" style="margin-top:4px; background:#f1f5f9; padding:4px 6px; border-radius:4px;">
+        <span style="font-weight:bold; color:#1e293b;">🏷️ 路線名の表記:</span>
+        <select id="rail-name-mode-select" style="width:235px; margin-bottom:0; padding:2px 6px; font-size:11px; font-weight:bold;" onchange="onRailNameModeChange()">
+          <option value="PASSENGER_BOTH" selected>旅客案内名＋正式名 併記（例: 埼京線 [赤羽線]）</option>
+          <option value="PASSENGER">旅客案内上の名称優先（例: 埼京線）</option>
+          <option value="OFFICIAL">正式名称・N05原典（例: 赤羽線）</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="era-pills">
+        <button class="pill-btn era-active" data-efilter="ALL" onclick="setRailEraFilter('ALL')">現役＋廃線すべて</button>
+        <button class="pill-btn" data-efilter="ACTIVE" onclick="setRailEraFilter('ACTIVE')">現役のみ</button>
+        <button class="pill-btn" data-efilter="ABANDONED" onclick="setRailEraFilter('ABANDONED')">廃線のみ(1950〜)</button>
+      </div>
+      <div class="filter-pills">
+        <button class="pill-btn active" data-rfilter="ALL" onclick="setRailFilter('ALL')">すべて</button>
+        <button class="pill-btn" data-rfilter="UNRIDDEN" onclick="setRailFilter('UNRIDDEN')">未乗</button>
+        <button class="pill-btn" data-rfilter="PARTIAL" onclick="setRailFilter('PARTIAL')">一部乗車</button>
+        <button class="pill-btn" data-rfilter="COMPLETE" onclick="setRailFilter('COMPLETE')">完乗</button>
+      </div>
+      <div style="display:flex; gap:4px; align-items:center;">
+        <select id="rail-pref-select" style="flex:0.85; margin-bottom:0;" onchange="clearMapLineLock(); renderRailLineList();">
+          <option value="ALL">全国すべて</option>
+        </select>
+        <input type="text" id="rail-search-input" style="flex:1.15; margin-bottom:0;" placeholder="路線名・会社・駅名で検索" oninput="onRailSearchInput()">
+      </div>
+      <div style="display:flex; justify-content:space-between; font-size:10px; color:#64748b; margin-top:2px;">
+        <span>表示件数: <strong id="rail-filtered-count">0 路線</strong></span>
+        <span id="patch-status-text" style="color:#92400e; font-weight:bold;">最新廃線パッチ適用中</span>
+      </div>
+      <div class="lock-banner" id="rail-lock-banner">
+        <span id="rail-lock-text">🎯 地図選択中の路線に絞り込み中</span>
+        <button onclick="clearMapLineLock()">絞り込み解除</button>
+      </div>
+    </div>
+
+    <div id="rail-line-list" class="scroll-list"></div>
+    <div id="rail-detail-panel" class="detail-panel">
+      <div style="color:#64748b; text-align:center; padding:30px 10px;">路線リストまたは地図上の線路をクリックすると詳細が開きます</div>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       タブ3：✈️ 空路（国内空港＆搭乗ルート）ペイン
+       ========================================== -->
+  <div class="tab-pane" id="pane-air">
+    <div class="section">
+      <div class="progress-wrap">
+        <div class="progress-label">
+          <span><strong>✈️ 国内空港 訪問・御翔印制覇率</strong></span>
+          <span id="air-airport-stats">0 / 0 空港 (御翔印: 0)</span>
+        </div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill air-fill" id="air-airport-bar"></div></div>
+      </div>
+      <div class="progress-wrap" style="margin-bottom:4px;">
+        <div class="progress-label">
+          <span><strong>🛫 国内搭乗ルート 制覇数</strong></span>
+          <span id="air-route-stats">0 / 0 路線</span>
+        </div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill air-fill" id="air-route-bar"></div></div>
+      </div>
+
+      <!-- 任意の空港ペアで搭乗ルートを追加・塗りつぶせるビルダー -->
+      <div class="patch-box" style="background:#f0f9ff; border-color:#bae6fd; color:#0369a1;">
+        <div style="font-weight:bold; margin-bottom:3px;">➕ 搭乗ルート（空港ペア）を追加して「搭乗済」にする</div>
+        <div class="range-select-row">
+          <select id="air-from-select"></select>
+          <span>⇔</span>
+          <select id="air-to-select"></select>
+        </div>
+        <button class="btn btn-air" style="width:100%;" onclick="addOrRideAirRoute()">✈️ この空港間ルートを「搭乗済」として追加・記録</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="era-pills">
+        <button class="pill-btn active" data-amode="ROUTES" onclick="setAirViewMode('ROUTES')">🛫 搭乗ルート一覧</button>
+        <button class="pill-btn" data-amode="AIRPORTS" onclick="setAirViewMode('AIRPORTS')">🏢 全国空港・御翔印一覧</button>
+        <button class="pill-btn" data-amode="RIDDEN_ONLY" onclick="setAirViewMode('RIDDEN_ONLY')">✨ 搭乗済ルートのみ</button>
+      </div>
+      <input type="text" id="air-search-input" placeholder="空港名・コード・都道府県で検索（例：羽田、新千歳、石垣）" style="margin-bottom:0;" oninput="renderAirList()">
+    </div>
+
+    <div id="air-list" class="scroll-list"></div>
+    <div id="air-detail-panel" class="detail-panel">
+      <div style="color:#64748b; text-align:center; padding:25px 10px;">
+        地図上の空路アーチまたは空港アイコンをクリックすると<br>搭乗済/未乗の切替や「御翔印」取得記録ができます
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       タブ4：⛴️ 航路（国内フェリー・離島航路）ペイン
+       ========================================== -->
+  <div class="tab-pane" id="pane-sea">
+    <div class="section">
+      <div class="progress-wrap">
+        <div class="progress-label">
+          <span><strong>⛴️ 国内フェリー・旅客船 航路乗船率</strong></span>
+          <span id="sea-route-stats">0 / 0 航路 (0.0%)</span>
+        </div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill sea-fill" id="sea-route-bar"></div></div>
+      </div>
+      <div class="control-row" style="font-size:11px; color:#475569;">
+        <span>⚓ 港（ポート）記録: <strong id="sea-port-stats">乗下船: 0 / 寄港: 0 港</strong></span>
+      </div>
+      <div class="btn-row" style="margin-top:4px;">
+        <button class="btn btn-sea" onclick="document.getElementById('sea-file-input').click()">
+          📂 N09全国定期旅客航路データ(JSON)読込（任意拡張）
+        </button>
+        <input type="file" id="sea-file-input" style="display:none" accept=".json" onchange="importCustomNetFile(event, 'sea')">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="filter-pills">
+        <button class="pill-btn active" data-sfilter="ALL" onclick="setSeaFilter('ALL')">すべて</button>
+        <button class="pill-btn" data-sfilter="UNRIDDEN" onclick="setSeaFilter('UNRIDDEN')">未乗</button>
+        <button class="pill-btn" data-sfilter="PARTIAL" onclick="setSeaFilter('PARTIAL')">一部乗船</button>
+        <button class="pill-btn" data-sfilter="COMPLETE" onclick="setSeaFilter('COMPLETE')">完乗</button>
+      </div>
+      <input type="text" id="sea-search-input" placeholder="航路名・船会社・港名で検索（例：津軽海峡、佐渡、さんふらわあ）" style="margin-bottom:0;" oninput="renderSeaList()">
+    </div>
+
+    <div id="sea-list" class="scroll-list"></div>
+    <div id="sea-detail-panel" class="detail-panel">
+      <div style="color:#64748b; text-align:center; padding:25px 10px;">
+        航路リストまたは海上の航路ラインをクリックすると<br>区間ごとの乗船記録と港ステータスを変更できます
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       タブ5：🚌 バス路線（BRT・高速・路線バス）ペイン
+       ========================================== -->
+  <div class="tab-pane" id="pane-bus">
+    <div class="section">
+      <div class="progress-wrap">
+        <div class="progress-label">
+          <span><strong>🚌 バス路線（BRT・連絡・高速バス）完乗数</strong></span>
+          <span id="bus-route-stats">0 / 0 路線</span>
+        </div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill bus-fill" id="bus-route-bar"></div></div>
+      </div>
+      <div class="progress-wrap" style="margin-bottom:3px;">
+        <div class="progress-label">
+          <span><strong>🚏 バス区間 乗車率</strong></span>
+          <span id="bus-seg-stats">0 / 0 区間 (0.0%)</span>
+        </div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill bus-fill" id="bus-seg-bar"></div></div>
+      </div>
+
+      <!-- 自由なバス乗車区間を追加できるマイバスビルダー -->
+      <div class="patch-box" style="background:#ecfdf5; border-color:#a7f3d0; color:#065f46;">
+        <div style="font-weight:bold; margin-bottom:3px;">➕ 乗ったバス路線・区間を新規登録（駅・空港・港名から自動座標検索）</div>
+        <input type="text" id="custom-bus-name" placeholder="路線名（例：京都市バス 205系統、JRバス東北 みずうみ号）" style="font-size:11px; padding:3px 6px;">
+        <div style="display:flex; gap:4px; margin-bottom:4px;">
+          <input type="text" id="custom-bus-from" placeholder="乗車停留所/駅名" style="font-size:11px; padding:3px 6px; margin-bottom:0;">
+          <input type="text" id="custom-bus-to" placeholder="降車停留所/駅名" style="font-size:11px; padding:3px 6px; margin-bottom:0;">
+        </div>
+        <button class="btn btn-bus" style="width:100%;" onclick="addCustomBusRoute()">🚌 このバス区間を追加して「乗車済」にする</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="filter-pills">
+        <button class="pill-btn active" data-bfilter="ALL" onclick="setBusFilter('ALL')">すべて</button>
+        <button class="pill-btn" data-bfilter="UNRIDDEN" onclick="setBusFilter('UNRIDDEN')">未乗</button>
+        <button class="pill-btn" data-bfilter="PARTIAL" onclick="setBusFilter('PARTIAL')">一部乗車</button>
+        <button class="pill-btn" data-bfilter="COMPLETE" onclick="setBusFilter('COMPLETE')">完乗</button>
+      </div>
+      <input type="text" id="bus-search-input" placeholder="BRT・バス路線名・停留所名で検索（例：気仙沼、大船渡、日田彦山）" style="margin-bottom:0;" oninput="renderBusList()">
+    </div>
+
+    <div id="bus-list" class="scroll-list"></div>
+    <div id="bus-detail-panel" class="detail-panel">
+      <div style="color:#64748b; text-align:center; padding:25px 10px;">
+        バス路線リストまたは地図上のバスルートをクリックすると<br>停留所間の乗車記録を変更できます
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="map-container">
+  <div id="loading-overlay">
+    <p id="loading-title" style="margin-bottom:8px; font-weight:bold;">日本全国 5大交通網＆市区町村データを準備しています...</p>
+    <p id="loading-sub" style="font-size:12px; color:#cbd5e1;">（初回は数秒ほどかかります）</p>
+  </div>
+  <div id="mode-badge">🏙️ 現在：市区町村クリックモード（他レイヤーは反応しません）</div>
+  <div id="zoom-hint">拡大・縮小は <strong>Ctrl + ホイール</strong> または左上の <strong>＋ / －</strong> ボタンで行えます</div>
+  <div id="map"></div>
+
+  <!-- 5タブ統合凡例 -->
+  <div class="legend">
+    <div style="font-weight:bold; margin-bottom:2px;">🏙️ 市区町村 (0:未踏〜4:居住)</div>
+    <div class="legend-item">
+      <span class="legend-color" style="background:#0ea5e9"></span>通過
+      <span class="legend-color" style="background:#22c55e"></span>立寄
+      <span class="legend-color" style="background:#f97316"></span>宿泊
+      <span class="legend-color" style="background:#a855f7"></span>居住
+    </div>
+    <div style="font-weight:bold; margin:4px 0 2px; padding-top:3px; border-top:1px solid #e2e8f0;">🚃 鉄道（現役 ＆ 1950〜2026廃線）</div>
+    <div class="legend-item"><span class="legend-line" style="background:#475569; height:2px;"></span>現役未乗 / <span class="legend-line" style="background:#e11d48; height:4px;"></span>現役乗車済</div>
+    <div class="legend-item"><span class="legend-line" style="background:#a16207; height:2px;"></span>廃線未乗 / <span class="legend-line" style="background:#d97706; height:4px;"></span>廃線乗車済</div>
+    <div style="font-weight:bold; margin:4px 0 2px; padding-top:3px; border-top:1px solid #e2e8f0;">✈️ 空路 ・ ⛴️ 航路 ・ 🚌 バス</div>
+    <div class="legend-item"><span class="legend-line" style="background:#0284c7; height:3.5px;"></span>搭乗済空路（水色破線＝未乗）</div>
+    <div class="legend-item"><span class="legend-line" style="background:#4f46e5; height:3.5px;"></span>乗船済航路（藍色破線＝未乗）</div>
+    <div class="legend-item"><span class="legend-line" style="background:#059669; height:3.5px;"></span>乗車済バス（緑破線＝未乗）</div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/topojson-client@3"></script>
+
+<script src="transport_data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
